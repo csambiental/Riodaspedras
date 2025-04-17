@@ -1,0 +1,434 @@
+<!DOCTYPE html lang="pt-BR">
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Mapa Interativo: Fazenda Rio das Pedras</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <style>
+    body { margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f0f0f0; }
+    #header { background-color: #2c3e50; color: white; padding: 15px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+    #header h1 { margin: 0; font-size: 24px; }
+    #map-container { position: relative; height: calc(100vh - 80px); }
+    #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+    #legend { position: absolute; bottom: 47.8px; right: 10px; background-color: rgba(255,255,255,1); padding: 10px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); font-size: 14px; z-index: 1000; }
+    .legend-item { display: flex; align-items: center; margin-bottom: 5px; }
+    .legend-color { width: 15px; height: 15px; margin-right: 5px; border: 1px solid #ccc; }
+    #sidebar { position: absolute; top: 80px; left: 10px; width: 200px; background-color: rgba(255,255,255,0.9); padding: 10px; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); z-index: 1; font-size: 14px; }
+    #sidebar button { width: 100%; margin: 5px 0; padding: 5px; background-color: #2c3e50; color: white; border: none; border-radius: 3px; cursor: pointer; }
+    #sidebar button:hover { background-color: #3b536b; }
+    #loader { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 16px; color: #2c3e50; background-color: rgba(255,255,255,0.8); padding: 10px; border-radius: 5px; z-index: 2; display: none; }
+    .mapboxgl-popup-content { border-radius: 5px; box-shadow: 0 1px 3px rgba(0,0,0,0.2); padding: 10px; font-size: 14px; }
+    .mapboxgl-popup-content h3 { margin: 0 0 5px; font-size: 16px; }
+    .mapboxgl-control-container .mapboxgl-ctrl-compass { transform: scale(2); margin: 10px; }
+    @media (max-width: 768px) {
+      #sidebar { width: 150px; font-size: 12px; }
+      #legend { font-size: 10px; bottom: 47.8px; }
+      #header h1 { font-size: 18px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <h1>Mapa Interativo: Fazenda Rio das Pedras</h1>
+  </div>
+  <div id="map-container">
+    <div id="map"></div>
+    <div id="loader">Carregando mapa...</div>
+    <div id="legend">
+      <h4>Legenda</h4>
+      <div class="legend-item"><div class="legend-color" style="background-color: #FFD700;"></div>Uso Consolidado</div>
+      <div class="legend-item"><div class="legend-color" style="background-color: #32CD32;"></div>Vegetação</div>
+      <div class="legend-item"><div class="legend-color" style="background-color: #FF4500;"></div>Perímetro</div>
+      <div class="legend-item"><div class="legend-color" style="background-color: #00BFFF;"></div>Hidrografia</div>
+      <div class="legend-item"><div class="legend-color" style="background-color: #BA55D3;"></div>Linhas de Transmissão</div>
+      <div class="legend-item"><div class="legend-color" style="background-color: #FF69B4;"></div>Nascentes</div>
+    </div>
+    <div id="sidebar">
+      <h4>Camadas</h4>
+      <label><input type="checkbox" id="toggle-all" checked> Selecionar Tudo</label><br>
+      <label><input type="checkbox" id="toggle-consolidado" checked> Uso Consolidado</label><br>
+      <label><input type="checkbox" id="toggle-vegetacao" checked> Vegetação</label><br>
+      <label><input type="checkbox" id="toggle-perimetro" checked> Perímetro</label><br>
+      <label><input type="checkbox" id="toggle-hidro" checked> Hidrografia</label><br>
+      <label><input type="checkbox" id="toggle-transmissao" checked> Linhas de Transmissão</label><br>
+      <label><input type="checkbox" id="toggle-nascentes" checked> Nascentes</label><br>
+      <button id="export-map">Exportar Mapa</button>
+    </div>
+  </div>
+  <script>
+    mapboxgl.accessToken = 'pk.eyJ1Ijoiam9hb3BlZHJvY3AiLCJhIjoiY204c3J2ajM2MDNnMjJsb2UzZzRiMmliZCJ9.5ErYD9_RR-P_PSIEm28x4w';
+
+    const map = new mapboxgl.Map({
+      container: 'map',
+      style: 'mapbox://styles/mapbox/satellite-v9',
+      center: [-50.43, -23.87],
+      zoom: 12,
+      preserveDrawingBuffer: true
+    });
+
+    map.addControl(new mapboxgl.NavigationControl());
+    map.addControl(new mapboxgl.FullscreenControl());
+    map.addControl(new mapboxgl.ScaleControl({ position: 'top-left' }));
+
+    let bounds = new mapboxgl.LngLatBounds();
+    const sources = ['consolidado', 'vegetacao', 'perimetro', 'hidro', 'transmissao', 'nascentes'];
+    const layers = [
+      { id: 'consolidado-layer', type: 'fill', source: 'consolidado', paint: { 'fill-color': '#FFD700', 'fill-opacity': 0.7, 'fill-outline-color': '#000000' } },
+      { id: 'vegetacao-layer', type: 'fill', source: 'vegetacao', paint: { 'fill-color': '#32CD32', 'fill-opacity': 0.7, 'fill-outline-color': '#000000' } },
+      { id: 'perimetro-layer', type: 'line', source: 'perimetro', paint: { 'line-color': '#FF4500', 'line-width': 2 } },
+      { id: 'hidro-layer', type: 'line', source: 'hidro', paint: { 'line-color': '#00BFFF', 'line-width': 2 } },
+      { id: 'transmissao-layer', type: 'line', source: 'transmissao', paint: { 'line-color': '#BA55D3', 'line-width': 2 } },
+      { id: 'nascentes-layer', type: 'circle', source: 'nascentes', paint: { 'circle-radius': 6, 'circle-color': '#FF69B4' } },
+      { id: 'nascentes-labels', type: 'symbol', source: 'nascentes', layout: { 'text-field': ['get', 'id'], 'text-size': 12, 'text-offset': [0, 1], 'text-anchor': 'top', 'visibility': 'none' }, paint: { 'text-color': '#000000', 'text-halo-color': '#FFFFFF', 'text-halo-width': 1 } }
+    ];
+
+    map.on('load', () => {
+      map.addControl(new mapboxgl.NavigationControl({ showCompass: true, showZoom: false }), 'top-right');
+      document.getElementById('loader').style.display = 'block';
+
+      console.log('Map loaded, adding sources...');
+
+      sources.forEach(source => {
+        map.addSource(source, { type: 'geojson', data: `converted/${source}_wgs84.geojson` });
+      });
+
+      console.log('Adding layers...');
+
+      const checkSourcesLoaded = setInterval(() => {
+        const allLoaded = sources.every(source => map.isSourceLoaded(source));
+        if (allLoaded) {
+          clearInterval(checkSourcesLoaded);
+          document.getElementById('loader').style.display = 'none';
+
+          layers.forEach(layer => {
+            map.addLayer(layer);
+          });
+
+          console.log('Layers added');
+
+          sources.forEach(source => {
+            const data = map.getSource(source)._data;
+            if (data && data.features) {
+              data.features.forEach(feature => {
+                if (feature.geometry.type === 'Point') {
+                  bounds.extend(feature.geometry.coordinates);
+                } else if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon') {
+                  const coords = feature.geometry.coordinates;
+                  coords.forEach(polygon => {
+                    if (feature.geometry.type === 'Polygon') {
+                      polygon.forEach(coord => bounds.extend(coord));
+                    } else {
+                      polygon[0].forEach(coord => bounds.extend(coord));
+                    }
+                  });
+                } else if (feature.geometry.type === 'LineString') {
+                  feature.geometry.coordinates.forEach(coord => bounds.extend(coord));
+                }
+              });
+            }
+          });
+          if (!bounds.isEmpty()) {
+            map.fitBounds(bounds, { padding: 50 });
+            console.log('Map adjusted to fit all features');
+          } else {
+            console.log('No features found to adjust bounds');
+          }
+        }
+      }, 100);
+    });
+
+    map.on('zoom', () => {
+      const zoom = map.getZoom();
+      if (zoom > 14) {
+        map.setLayoutProperty('nascentes-labels', 'visibility', 'visible');
+      } else {
+        map.setLayoutProperty('nascentes-labels', 'visibility', 'none');
+      }
+    });
+
+    // Função pra desenhar a rosa dos ventos diretamente no canvas
+    function drawCompass(ctx, x, y, size) {
+      const radius = size / 2;
+      ctx.beginPath();
+      ctx.arc(x + radius, y + radius, radius, 0, 2 * Math.PI);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fill();
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Desenhar as setas (N, S, E, W)
+      ctx.beginPath();
+      // Norte
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + radius, y + radius * 0.4);
+      // Sul
+      ctx.moveTo(x + radius, y + size);
+      ctx.lineTo(x + radius, y + size - radius * 0.4);
+      // Leste
+      ctx.moveTo(x + size, y + radius);
+      ctx.lineTo(x + size - radius * 0.4, y + radius);
+      // Oeste
+      ctx.moveTo(x, y + radius);
+      ctx.lineTo(x + radius * 0.4, y + radius);
+      ctx.stroke();
+
+      // Letras
+      ctx.font = '12px Arial';
+      ctx.fillStyle = '#000000';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('N', x + radius, y + radius * 0.2);
+      ctx.fillText('S', x + radius, y + size - radius * 0.2);
+      ctx.fillText('E', x + size - radius * 0.2, y + radius);
+      ctx.fillText('W', x + radius * 0.2, y + radius);
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const toggleCheckboxes = [
+        'toggle-consolidado', 'toggle-vegetacao', 'toggle-perimetro',
+        'toggle-hidro', 'toggle-transmissao', 'toggle-nascentes'
+      ];
+      const toggleAllCheckbox = document.getElementById('toggle-all');
+
+      console.log('Configurando eventos da sidebar...');
+
+      toggleCheckboxes.forEach(id => {
+        const checkbox = document.getElementById(id);
+        const layerId = id.replace('toggle-', '') + '-layer';
+        checkbox.addEventListener('change', (e) => {
+          console.log(`Alterando visibilidade da camada ${layerId}: ${e.target.checked}`);
+          map.setLayoutProperty(layerId, 'visibility', e.target.checked ? 'visible' : 'none');
+          toggleAllCheckbox.checked = toggleCheckboxes.every(cb => document.getElementById(cb).checked);
+        });
+      });
+
+      toggleAllCheckbox.addEventListener('change', (e) => {
+        console.log(`Alterando todas as camadas: ${e.target.checked}`);
+        const checked = e.target.checked;
+        toggleCheckboxes.forEach(id => {
+          const checkbox = document.getElementById(id);
+          checkbox.checked = checked;
+          const layerId = id.replace('toggle-', '') + '-layer';
+          map.setLayoutProperty(layerId, 'visibility', checked ? 'visible' : 'none');
+        });
+      });
+
+      document.getElementById('export-map').addEventListener('click', () => {
+        console.log('Exportando mapa com logos no canto esquerdo e menos espaço branco...');
+        const header = document.getElementById('header');
+        const legend = document.getElementById('legend');
+
+        const margin = 2; // Reduzido pra minimizar o espaço branco
+        const logoHeight = 100;
+        const logoCsHeight = 200;
+        const headerHeight = 60;
+        const footerHeight = 40;
+        const footerMargin = 20;
+
+        // Capturar a legenda pra obter suas dimensões
+        html2canvas(legend).then(legendCanvas => {
+          const legendWidth = legendCanvas.width;
+          const legendHeight = legendCanvas.height;
+
+          const mapCanvas = map.getCanvas();
+
+          // Definir dimensões do canvas final
+          const finalCanvas = document.createElement('canvas');
+          const ctx = finalCanvas.getContext('2d');
+          finalCanvas.width = mapCanvas.width + margin * 2;
+          finalCanvas.height = logoCsHeight + margin * 2 + headerHeight + margin + mapCanvas.height + footerMargin + footerHeight;
+
+          // Fundo branco
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
+
+          // Carregar e desenhar os logos no canto esquerdo
+          const logoFazenda = new Image();
+          logoFazenda.src = 'logo.png';
+          logoFazenda.onload = () => {
+            const logoFazendaWidth = (logoFazenda.width / logoFazenda.height) * logoHeight;
+
+            const logoCs = new Image();
+            logoCs.src = 'logo_cs.png';
+            logoCs.onload = () => {
+              const logoCsWidth = (logoCs.width / logoCs.height) * logoCsHeight;
+              const logosStartX = margin; // Alinhar ao canto esquerdo
+
+              // Desenhar o logo da fazenda
+              ctx.drawImage(logoFazenda, logosStartX, margin + (logoCsHeight - logoHeight) / 2, logoFazendaWidth, logoHeight);
+
+              // Desenhar o logo CS ao lado
+              ctx.drawImage(logoCs, logosStartX + logoFazendaWidth + margin, margin, logoCsWidth, logoCsHeight);
+
+              // Desenhar o título
+              html2canvas(header).then(headerCanvas => {
+                const headerTop = logoCsHeight + margin;
+                ctx.drawImage(headerCanvas, (finalCanvas.width - headerCanvas.width) / 2, headerTop);
+
+                // Desenhar o mapa
+                const mapTop = headerTop + headerHeight + margin;
+                ctx.drawImage(mapCanvas, margin, mapTop);
+
+                // Desenhar a legenda dentro do mapa
+                const legendX = mapCanvas.width - legendWidth - 10 + margin;
+                const legendY = mapTop + mapCanvas.height - legendHeight - 10;
+                ctx.drawImage(legendCanvas, legendX, legendY);
+
+                // Desenhar a rosa dos ventos
+                drawCompass(ctx, finalCanvas.width - 60 - margin, mapTop + 10, 50);
+
+                // Desenhar o rodapé
+                ctx.font = '12px Arial';
+                ctx.fillStyle = '#000000';
+                ctx.textAlign = 'right';
+                const date = new Date().toLocaleDateString('pt-BR');
+                const footerTop = mapTop + mapCanvas.height + footerMargin;
+                ctx.fillText(`Gerado em: ${date} - Fazenda Rio das Pedras - Elaborado por: CS Consultoria Ambiental`, finalCanvas.width - margin, footerTop);
+
+                // Exportar a imagem
+                const link = document.createElement('a');
+                link.href = finalCanvas.toDataURL('image/png');
+                link.download = 'mapa_fazenda_rio_das_pedras.png';
+                link.click();
+              });
+            };
+            logoCs.onerror = () => {
+              console.error('Erro ao carregar o logo_cs.png. Verifique se o arquivo está na pasta correta.');
+              ctx.drawImage(logoFazenda, margin, margin, logoFazendaWidth, logoHeight);
+
+              html2canvas(header).then(headerCanvas => {
+                const headerTop = logoHeight + margin;
+                ctx.drawImage(headerCanvas, (finalCanvas.width - headerCanvas.width) / 2, headerTop);
+
+                const mapTop = headerTop + headerHeight + margin;
+                ctx.drawImage(mapCanvas, margin, mapTop);
+
+                const legendX = mapCanvas.width - legendWidth - 10 + margin;
+                const legendY = mapTop + mapCanvas.height - legendHeight - 10;
+                ctx.drawImage(legendCanvas, legendX, legendY);
+
+                drawCompass(ctx, finalCanvas.width - 60 - margin, mapTop + 10, 50);
+
+                ctx.font = '12px Arial';
+                ctx.fillStyle = '#000000';
+                ctx.textAlign = 'right';
+                const date = new Date().toLocaleDateString('pt-BR');
+                const footerTop = mapTop + mapCanvas.height + footerMargin;
+                ctx.fillText(`Gerado em: ${date} - Fazenda Rio das Pedras - Elaborado por: CS Consultoria Ambiental`, finalCanvas.width - margin, footerTop);
+
+                const link = document.createElement('a');
+                link.href = finalCanvas.toDataURL('image/png');
+                link.download = 'mapa_fazenda_rio_das_pedras.png';
+                link.click();
+              });
+            };
+          };
+          logoFazenda.onerror = () => {
+            console.error('Erro ao carregar o logo.png. Verifique se o arquivo está na pasta correta.');
+            const logoCs = new Image();
+            logoCs.src = 'logo_cs.png';
+            logoCs.onload = () => {
+              const logoCsWidth = (logoCs.width / logoCs.height) * logoCsHeight;
+              ctx.drawImage(logoCs, margin, margin, logoCsWidth, logoCsHeight);
+
+              html2canvas(header).then(headerCanvas => {
+                const headerTop = logoCsHeight + margin;
+                ctx.drawImage(headerCanvas, (finalCanvas.width - headerCanvas.width) / 2, headerTop);
+
+                const mapTop = headerTop + headerHeight + margin;
+                ctx.drawImage(mapCanvas, margin, mapTop);
+
+                const legendX = mapCanvas.width - legendWidth - 10 + margin;
+                const legendY = mapTop + mapCanvas.height - legendHeight - 10;
+                ctx.drawImage(legendCanvas, legendX, legendY);
+
+                drawCompass(ctx, finalCanvas.width - 60 - margin, mapTop + 10, 50);
+
+                ctx.font = '12px Arial';
+                ctx.fillStyle = '#000000';
+                ctx.textAlign = 'right';
+                const date = new Date().toLocaleDateString('pt-BR');
+                const footerTop = mapTop + mapCanvas.height + footerMargin;
+                ctx.fillText(`Gerado em: ${date} - Fazenda Rio das Pedras - Elaborado por: CS Consultoria Ambiental`, finalCanvas.width - margin, footerTop);
+
+                const link = document.createElement('a');
+                link.href = finalCanvas.toDataURL('image/png');
+                link.download = 'mapa_fazenda_rio_das_pedras.png';
+                link.click();
+              });
+            };
+            logoCs.onerror = () => {
+              console.error('Erro ao carregar ambos os logos.');
+              html2canvas(header).then(headerCanvas => {
+                const headerTop = margin;
+                ctx.drawImage(headerCanvas, (finalCanvas.width - headerCanvas.width) / 2, headerTop);
+
+                const mapTop = headerTop + headerHeight + margin;
+                ctx.drawImage(mapCanvas, margin, mapTop);
+
+                const legendX = mapCanvas.width - legendWidth - 10 + margin;
+                const legendY = mapTop + mapCanvas.height - legendHeight - 10;
+                ctx.drawImage(legendCanvas, legendX, legendY);
+
+                drawCompass(ctx, finalCanvas.width - 60 - margin, mapTop + 10, 50);
+
+                ctx.font = '12px Arial';
+                ctx.fillStyle = '#000000';
+                ctx.textAlign = 'right';
+                const date = new Date().toLocaleDateString('pt-BR');
+                const footerTop = mapTop + mapCanvas.height + footerMargin;
+                ctx.fillText(`Gerado em: ${date} - Fazenda Rio das Pedras - Elaborado por: CS Consultoria Ambiental`, finalCanvas.width - margin, footerTop);
+
+                const link = document.createElement('a');
+                link.href = finalCanvas.toDataURL('image/png');
+                link.download = 'mapa_fazenda_rio_das_pedras.png';
+                link.click();
+              });
+            };
+          };
+        });
+      });
+
+      const createPopup = (e, layerName) => {
+        const props = e.features[0]?.properties || {};
+        let html = `<h3>${layerName}</h3>`;
+        for (const [key, value] of Object.entries(props)) {
+          html += `<strong>${key}:</strong> ${value}<br>`;
+        }
+        new mapboxgl.Popup()
+          .setLngLat(e.lngLat)
+          .setHTML(html)
+          .addTo(map);
+      };
+
+      layers.forEach(layer => {
+        if (layer.id === 'nascentes-labels') return;
+        const layerName = layer.id.replace('-layer', '');
+        map.on('click', layer.id, (e) => {
+          console.log(`Clique na camada ${layer.id}`);
+          createPopup(e, layerName.charAt(0).toUpperCase() + layerName.slice(1));
+        });
+        map.on('mouseenter', layer.id, () => {
+          map.getCanvas().style.cursor = 'pointer';
+        });
+        map.on('mouseleave', layer.id, () => {
+          map.getCanvas().style.cursor = '';
+        });
+      });
+    });
+
+    map.on('error', (e) => {
+      console.error('Mapbox error:', e.error);
+      document.getElementById('loader').style.display = 'none';
+    });
+
+    map.on('sourcedata', (e) => {
+      console.log(`Source ${e.sourceId} loaded:`, e.isSourceLoaded, ' - URL:', e.source ? e.source.data : 'undefined');
+    });
+  </script>
+</body>
+</html>
